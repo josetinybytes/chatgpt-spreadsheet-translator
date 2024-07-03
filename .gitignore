@@ -1,0 +1,9 @@
+.env
+client.json
+credentials.json
+npm-debug.log*
+/node_modules
+.env
+firebaseAdmin.json
+liveFirebaseAdmin.json
+.env.bkup
