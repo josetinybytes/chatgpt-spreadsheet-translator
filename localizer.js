@@ -65,7 +65,10 @@ async function localizeTexts(
         content:
           `Expect translation requests in JSON format: {"key":"localizationKey", "en":"englishText" ,"context":"contextForTheText", "languagesToRetrieve":["languageCode1", ...], "featureNames": {"featureKey":{"languageCode":"Feature Translation", ...,"context":"Context for the feature"}}}. 
                 Translate the English text into the requested languages. 
-                Use the provided context for the text, feature names and features context to provide accurate translations.`
+                Use the provided context for the text, feature names and features context to provide accurate translations.
+                The text might contain HTML or rich text formatting, so please ensure that the translation is accurate and preserves the formatting.
+                Also it can contain string formatters like {0}, {1}, etc. Please ensure that the translation preserves the string formatters.`
+
       },
       {
         role: "user",
