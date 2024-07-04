@@ -229,12 +229,12 @@ async function translateSpreadsheet(sheetsCache, sheetId, gameContext) {
  * @returns {String} The language code
  */
 function getLanguageCode(languageString) {
-  const match = languageString.match(/\(([^)]+)\)/);
+  const match = languageString.match(/\[([^\]]+)\]/);
   return match ? match[1] : "";
 }
 
 
 
-translateSpreadsheet(new SheetsCache(`1V-NGWWb3PxIl3YZmB7IqDWL6lgqtpG1S1tykvCp35ro`), 0, {});
+//translateSpreadsheet(new SheetsCache(`1V-NGWWb3PxIl3YZmB7IqDWL6lgqtpG1S1tykvCp35ro`), 0, {});
 
 module.exports = {}
