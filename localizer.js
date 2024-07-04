@@ -1,7 +1,9 @@
 const { GoogleSpreadsheet } = require("google-spreadsheet");
 const { OpenAI } = require("openai");
 const { SheetsCache } = require('./sheetsHelper');
-const { Semaphore } = require("./utils");
+const { Semaphore, withRetry } = require("./utils");
+
+const PARALLEL_TASKS = parseInt(process.env.PARALLEL_TASKS) || 5;
 
 
 const openai = new OpenAI({
@@ -9,13 +11,6 @@ const openai = new OpenAI({
   organization: process.env.OPENAI_API_ORG,
 });
 
-
-
-
-let featureNames = {
-  cash: { en: "Cash", gold: "Gold" },
-  gambitOfGlory: { en: "Gambit of Glory" },
-};
 
 
 
@@ -34,10 +29,14 @@ async function localizeTexts(
   englishText,
   languageCodesToTranslateTo,
   gameContext,
-  textContext
+  textContext,
+  gptVersion
 ) {
+
+  if (gptVersion == null)
+    gptVersion = "gpt-4o";
   let response = await openai.chat.completions.create({
-    model: "gpt-4-turbo-preview",
+    model: gptVersion,
     response_format: { "type": "json_object" },
     messages: [
       {
@@ -64,22 +63,9 @@ async function localizeTexts(
       {
         role: "system",
         content:
-          `Expect translation requests in JSON format: {"key":"localizationKey", "en":"englishText" ,"context":"contextForTheText", "languagesToRetrieve":["languageCode1", ...],"featureNames":{
-        }. 
-                Translate the English text into the requested languages.`
-      },
-      {
-        role: "system",
-        content:
-          `Expect translation requests in JSON format: {"key":"localizationKey", "en":"englishText" ,"context":"contextForTheText", "languagesToRetrieve":["languageCode1", ...], "featureNames": {"featureKey":{"languageCode":"Feature Translation", ...}}}. 
+          `Expect translation requests in JSON format: {"key":"localizationKey", "en":"englishText" ,"context":"contextForTheText", "languagesToRetrieve":["languageCode1", ...], "featureNames": {"featureKey":{"languageCode":"Feature Translation", ...,"context":"Context for the feature"}}}. 
                 Translate the English text into the requested languages. 
-                Always use the provided translations for feature names in the appropriate language if the text contains any feature name.`
-      },
-      {
-        role: "system",
-        content:
-          `The featureNames variable contains translations for feature names in the format {"featureKey":{"languageCode":"Feature Translation", ...}}. 
-                Always use the provided translations for feature names in the appropriate language if the text contains any feature name.`
+                Use the provided context for the text, feature names and features context to provide accurate translations.`
       },
       {
         role: "user",
@@ -92,6 +78,7 @@ async function localizeTexts(
         }),
       },
     ],
+
   });
 
   return JSON.parse(response.choices[0].message.content);
@@ -102,15 +89,53 @@ async function localizeTexts(
 
  * @returns {Promise<GameContext>} The game context
  */
-async function createGameContextFromSpreedsheet() {
+async function createGameContextFromSpreedsheet(documentId, featureSheetId, gameContextSheetId) {
 
   /**
    * @type {GameContext}
    */
-  let gameContext = {};
+  let gameContext = {
+    description: "",
+    features: {},
+  };
 
-  gameContext.description = `Massive warfare is a`
-  gameContext.features = {};
+
+  let sheetsCache = new SheetsCache(documentId);
+  let [featureSheet, gameContextSheet] = await Promise.all([sheetsCache.getSheetById(featureSheetId), sheetsCache.getSheetById(gameContextSheetId)]);
+
+  gameContext.description = gameContextSheet.getCell(1, 0).value;
+
+
+  let header = await sheetsCache.getRow(sheetsCache.sheetGuiToName[featureSheetId], 0, 0);
+
+
+  for (let i = 1; i < featureSheet.rowCount; i++) {
+    let featureKey = featureSheet.getCell(i, 0).value;
+
+    if (featureKey == null || featureKey == '')
+      continue;
+
+    let featureContext = null;
+    try {
+      featureContext = featureSheet.getCell(i, 0)._rawData.note;
+    } catch { }
+    let feature = {};
+    feature.context = featureContext;
+
+    for (let j = 1; j < header.length; j++) {
+
+      let cell = featureSheet.getCell(i, j);
+
+      if (cell.value == null || cell.value == '')
+        continue;
+
+      feature[getLanguageCode(header[j])] = cell.value;
+
+    }
+
+    gameContext.features[featureKey] = feature;
+  }
+
 
   return gameContext;
 }
@@ -124,13 +149,17 @@ async function createGameContextFromSpreedsheet() {
  * @param {SheetsCache} sheetsCache  The spreadsheet the system will translate
  * @param {Number} sheetId The id of the sheet to translate
  * @param {GameContext} gameContext The context for what is being translated
+ * @param {String} gptVersion The version of GPT to use
  */
-async function translateSpreadsheet(sheetsCache, sheetId, gameContext) {
+async function translateSpreadsheet(sheetsCache, sheetId, gameContext, gptVersion) {
   let sheet = await sheetsCache.getSheetById(sheetId);
+
+  if (gameContext == null)
+    gameContext = { description: "", features: {} };
 
   let toTranslate = [];
   let header = await sheetsCache.getRow(sheetsCache.sheetGuiToName[sheetId], 0, 0);
-  let keyColumnIndex = header.findIndex(x => x.toLowerCase().trim() === 'keys');
+  let keyColumnIndex = header.findIndex(x => x.toLowerCase().trim() === 'keys' || x.toLowerCase().trim() === 'key');
   let enColumnIndex = header.findIndex(x => getLanguageCode(x).toLowerCase().trim() === 'en');
   let currentContext = null;
 
@@ -172,20 +201,20 @@ async function translateSpreadsheet(sheetsCache, sheetId, gameContext) {
 
 
 
-  let semaphore = new Semaphore(10);
 
   let tasks = [];
 
   for (let i = 0; i < toTranslate.length; i++) {
     try {
 
-      t = async () => {
+      t = async (index) => {
         let translateItem = toTranslate[i];
 
-        console.log(`Translating [${translateItem.key}] `);
-        console.time(`Translating [${translateItem.key}] `);
-        let result = await localizeTexts(translateItem.key, translateItem.en, translateItem.languageCodesToTranslateTo, { description: "", features: {} }, translateItem.context);
-        console.timeEnd(`Translating [${translateItem.key}] `);
+        console.log(`Translating (${index}) [${translateItem.key}]`);
+        console.time(`Translating (${index}) [${translateItem.key}]`);
+        await sleep(100 * index);//Offset the time for each request, so we don't get rate limited 
+        let result = await withRetry(async () => await localizeTexts(translateItem.key, translateItem.en, translateItem.languageCodesToTranslateTo, gameContext, translateItem.context, gptVersion), 3, 3000);
+        console.timeEnd(`Translating (${index}) [${translateItem.key}]`);
 
 
         for (let j = 0; j < header.length; j++) {
@@ -204,11 +233,11 @@ async function translateSpreadsheet(sheetsCache, sheetId, gameContext) {
         }
       }
 
-      tasks.push(t());
+      tasks.push(t(tasks.length));
 
-      if (tasks.length > 10) {
+      if (tasks.length >= PARALLEL_TASKS || i == toTranslate.length - 1) {
         await Promise.all(tasks);
-        await sheet.saveUpdatedCells();
+        await Promise.all([sheet.saveUpdatedCells(), sleep(1000)]);
         tasks = [];
       }
     } catch (e) {
@@ -220,6 +249,11 @@ async function translateSpreadsheet(sheetsCache, sheetId, gameContext) {
 
 
 
+}
+
+//Async set timeout function
+async function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 
@@ -234,7 +268,7 @@ function getLanguageCode(languageString) {
 }
 
 
-
-//translateSpreadsheet(new SheetsCache(`1V-NGWWb3PxIl3YZmB7IqDWL6lgqtpG1S1tykvCp35ro`), 0, {});
-
-module.exports = {}
+//createGameContextFromSpreedsheet(`1V-NGWWb3PxIl3YZmB7IqDWL6lgqtpG1S1tykvCp35ro`, 583341809, 784909874);
+// translateSpreadsheet(new SheetsCache(`1V-NGWWb3PxIl3YZmB7IqDWL6lgqtpG1S1tykvCp35ro`), 583341809, {});
+//https://docs.google.com/spreadsheets/d/1V-NGWWb3PxIl3YZmB7IqDWL6lgqtpG1S1tykvCp35ro/edit?gid=583341809#gid=
+module.exports = { translateSpreadsheet, createGameContextFromSpreedsheet }

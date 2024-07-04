@@ -1,6 +1,7 @@
 declare type FeaturesLocalization = {
   [key: string]: {
     [languageCode: string]: string;
+    context: string?; //The context of the feature
   };
 };
 
