@@ -1,5 +1,7 @@
 const { GoogleSpreadsheet } = require("google-spreadsheet");
 const { OpenAI } = require("openai");
+const { SheetsCache } = require('./sheetsHelper');
+const { Semaphore } = require("./utils");
 
 
 const openai = new OpenAI({
@@ -92,7 +94,7 @@ async function localizeTexts(
     ],
   });
 
-  return response.choices[0].message.content;
+  return JSON.parse(response.choices[0].message.content);
 }
 
 
@@ -119,17 +121,120 @@ async function createGameContextFromSpreedsheet() {
 
 /**
  * Translates all the missing keys in the spreadsheet.
- * @param {GoogleSpreadsheet} spreadsheetToTranslate  The spreadsheet the system will translate
+ * @param {SheetsCache} sheetsCache  The spreadsheet the system will translate
+ * @param {Number} sheetId The id of the sheet to translate
  * @param {GameContext} gameContext The context for what is being translated
  */
-async function translateSpreadsheet(spreadsheetToTranslate, gameContext) {
+async function translateSpreadsheet(sheetsCache, sheetId, gameContext) {
+  let sheet = await sheetsCache.getSheetById(sheetId);
+
+  let toTranslate = [];
+  let header = await sheetsCache.getRow(sheetsCache.sheetGuiToName[sheetId], 0, 0);
+  let keyColumnIndex = header.findIndex(x => x.toLowerCase().trim() === 'keys');
+  let enColumnIndex = header.findIndex(x => getLanguageCode(x).toLowerCase().trim() === 'en');
+  let currentContext = null;
+
+  for (let i = 1; i < sheet.rowCount; i++) {
+    let key = sheet.getCell(i, keyColumnIndex).value;
+    let en = sheet.getCell(i, enColumnIndex).value;
+
+    if (key == null || en == null)
+      continue;
+
+    try {
+      currentContext = sheet.getCell(i, keyColumnIndex)._rawData.note;
+    } catch (e) {
+      currentContext = null;
+    }
+    let missingKeys = [];
+    header.forEach((el, index) => {
+      if (index == keyColumnIndex || index == enColumnIndex)
+        return;
+
+      let cell = sheet.getCell(i, index);
+      if (cell.value == null || cell.value == '')
+        missingKeys.push(getLanguageCode(el));
+    });
 
 
 
+
+    if (missingKeys.length > 0) {
+      toTranslate.push({
+        key: key,
+        en: en,
+        languageCodesToTranslateTo: missingKeys,
+        context: currentContext,
+        rowIndex: i
+      })
+    }
+  }
+
+
+
+  let semaphore = new Semaphore(10);
+
+  let tasks = [];
+
+  for (let i = 0; i < toTranslate.length; i++) {
+    try {
+
+      t = async () => {
+        let translateItem = toTranslate[i];
+
+        console.log(`Translating [${translateItem.key}] `);
+        console.time(`Translating [${translateItem.key}] `);
+        let result = await localizeTexts(translateItem.key, translateItem.en, translateItem.languageCodesToTranslateTo, { description: "", features: {} }, translateItem.context);
+        console.timeEnd(`Translating [${translateItem.key}] `);
+
+
+        for (let j = 0; j < header.length; j++) {
+          let languageCode = getLanguageCode(header[j]);
+          if (languageCode == '' || result[languageCode] == null)
+            continue;
+
+
+
+          let resultText = result[languageCode][translateItem.key];
+          if (resultText == null)
+            continue;
+          sheet.getCell(translateItem.rowIndex, j).value = resultText;
+
+
+        }
+      }
+
+      tasks.push(t());
+
+      if (tasks.length > 10) {
+        await Promise.all(tasks);
+        await sheet.saveUpdatedCells();
+        tasks = [];
+      }
+    } catch (e) {
+      console.log(e);
+      await sheet.saveUpdatedCells();
+    } finally {
+    }
+  }
 
 
 
 }
 
+
+/**
+ * 
+ * @param {String} languageString 
+ * @returns {String} The language code
+ */
+function getLanguageCode(languageString) {
+  const match = languageString.match(/\(([^)]+)\)/);
+  return match ? match[1] : "";
+}
+
+
+
+translateSpreadsheet(new SheetsCache(`1V-NGWWb3PxIl3YZmB7IqDWL6lgqtpG1S1tykvCp35ro`), 0, {});
 
 module.exports = {}
