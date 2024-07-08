@@ -63,6 +63,7 @@ async function localizeTexts(
     featureNames: featuresToKeep,
   });
   try {
+    console.log(toTranslate);
     response = await openai.chat.completions.create({
       model: gptVersion,
       response_format: { "type": "json_object" },
@@ -87,14 +88,16 @@ async function localizeTexts(
         {
           role: "system",
           content:
-            `If unable to translate a key, include it in a "missing" section like this: "missing":[{"key":"originalKey", "reason":"explanation"}]. 
+            `If unable to translate a key, include it in a "missing" section like this:{..., "missing":[{"key":"originalKey","languageCode":"language code with error", "reason":"explanation"}]}. 
                 Provide a reason for each untranslated key.`
         },
         {
           role: "system",
           content:
             `Expect translation requests in JSON format: {"key":"localizationKey", "en":"englishText" ,"context":"contextForTheText", "languagesToRetrieve":["languageCode1", ...], "featureNames": {"featureKey":{"languageCode":"Feature Translation", ...,"context":"Context for the feature"}}}. 
-                Translate the English text into the requested languages. 
+                Translate the English text into the requested languages.
+                Don't translate the text in "key", just the text in the "en" field. "key" field is just and identifier and might have nothing to do with the actual text.
+                The actual text is in the "en" field.
                 Use the provided context for the text, feature names and features context to provide accurate translations.
                 The text might contain HTML or rich text formatting, so please ensure that the translation is accurate and preserves the formatting.
                 Also it can contain string formatters like {0}, {1}, etc. Please ensure that the translation preserves the string formatters.
@@ -309,6 +312,16 @@ async function translateSpreadsheet(sheetsCache, sheetId, gameContext, gptVersio
 
 
         }
+
+        console.log(result);
+        try {
+          if (result.missing != null && result.missing.length > 0) {
+            result.missing.forEach(x => {
+              console.log(`[Error] [${x.key}] in (${x.languageCode}) because ${x.reason}`);
+            });
+          }
+
+        } catch { }
       }
 
       tasks.push(t(tasks.length));
