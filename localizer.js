@@ -98,6 +98,7 @@ async function localizeTexts(
                 Translate the English text into the requested languages.
                 Don't translate the text in "key", just the text in the "en" field. "key" field is just and identifier and might have nothing to do with the actual text.
                 The actual text is in the "en" field.
+                Use UTF-8 encoding for the translations.
                 Use the provided context for the text, feature names and features context to provide accurate translations.
                 The text might contain HTML or rich text formatting, so please ensure that the translation is accurate and preserves the formatting.
                 Also it can contain string formatters like {0}, {1}, etc. Please ensure that the translation preserves the string formatters.
