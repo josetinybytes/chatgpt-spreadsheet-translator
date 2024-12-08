@@ -54,15 +54,23 @@ async function main() {
         console.error(`Please provide a sheet to translate.`);
         return;
     }
-
     let sheetUrl = args.sheet;
     let data = getDocumentIdAndGid(sheetUrl);
-    if (data.documentId == null || data.gid == null) {
+    if (data.documentId == null) {
         console.error(`Invalid sheet url. Please provide a valid sheet url.`);
         return;
     }
     console.log(`Translating sheet ${data.documentId} with gid ${data.gid}`);
-    await localizer.translateSpreadsheet(new spreadheetHelper.SheetsCache(data.documentId), parseInt(data.gid), gameContext, args.gptVersion);
+    let sheet = new spreadheetHelper.SheetsCache(data.documentId);
+    if (data.gid == null) {
+        let doc = await sheet.getDocument();
+        for (let { sheetId } of doc.sheetsByIndex) {
+            await localizer.translateSpreadsheet(sheet, sheetId, gameContext, args.gptVersion);
+        }
+    }
+    else {
+        await localizer.translateSpreadsheet(sheet, parseInt(data.gid), gameContext, args.gptVersion);
+    }
     console.log(`Translation complete.`);
 }
 

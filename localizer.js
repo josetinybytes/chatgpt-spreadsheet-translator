@@ -31,7 +31,8 @@ async function localizeTexts(
   languageCodesToTranslateTo,
   gameContext,
   textContext,
-  gptVersion
+  gptVersion,
+  category
 ) {
 
   if (gptVersion == null)
@@ -41,6 +42,9 @@ async function localizeTexts(
   let featuresToKeep = {};
   //Let's remove the non used features keys from the game context
   //Lets iterate over the features
+
+  //duplicating context object for safe deletes
+  gameContext = JSON.parse(JSON.stringify(gameContext));
   for (let featureKey in gameContext.features) {
     //Now remove all the keys from  gameContext.features[featureKey] that are not in the languageCodesToTranslateTo array and is not context
     for (let languageCode in gameContext.features[featureKey]) {
@@ -61,6 +65,7 @@ async function localizeTexts(
     context: textContext,
     languagesToRetrieve: languageCodesToTranslateTo,
     featureNames: featuresToKeep,
+    category: category
   });
   try {
     console.log(toTranslate);
@@ -83,7 +88,9 @@ async function localizeTexts(
           content:
             `Respond with a JSON object in the format {"languageCode": {"key":"translatedValue", ...}}. 
           Ensure the JSON object is minified. Where key is the original localizationKey and translatedValue is the translated value.
-          For example: when provided {"key":"hello","en":"Hello","languagesToRetrieve":["es"]} the response should be {"es":{"hello":"Hola"}}`
+          For example: when provided {"key":"hello","en":"Hello","languagesToRetrieve":["es"]} the response should be {"es":{"hello":"Hola"}}          
+          Other example: when provided {"key":"house","en":"Garden","languagesToRetrieve":["es"]} the response should be {"es":{"house":"Jardin"}}
+          Other example: when provided {"key":"jar_gift","en":"Gift","languagesToRetrieve":["es"]} the response should be {"es":{"jar_gift":"Regalo"}}`
         },
         {
           role: "system",
@@ -116,7 +123,7 @@ async function localizeTexts(
     if (e.status == 429) {
       console.log(`Too many requests. Waiting for ${e.headers['retry-after']} seconds before retrying`);
       await sleep(e.headers['retry-after-ms']);
-      return await localizeTexts(keyName, englishText, languageCodesToTranslateTo, gameContext, textContext, gptVersion);
+      return await localizeTexts(keyName, englishText, languageCodesToTranslateTo, gameContext, textContext, gptVersion, category);
     }
 
     throw e;
@@ -293,7 +300,7 @@ async function translateSpreadsheet(sheetsCache, sheetId, gameContext, gptVersio
         console.log(`Translating (${index}) [${translateItem.key}] (${translateItem.languageCodesToTranslateTo.join(', ')})`);
         console.time(`Translating (${index}) [${translateItem.key}] (${translateItem.languageCodesToTranslateTo.join(', ')})`);
         await sleep(100 * index);//Offset the time for each request, so we don't get rate limited 
-        let result = await withRetry(async () => await localizeTexts(translateItem.key, translateItem.en, translateItem.languageCodesToTranslateTo, gameContext, translateItem.context, gptVersion), 3, 3000);
+        let result = await withRetry(async () => await localizeTexts(translateItem.key, translateItem.en, translateItem.languageCodesToTranslateTo, gameContext, translateItem.context, gptVersion, sheet.a1SheetName), 3, 3000);
         console.timeEnd(`Translating (${index}) [${translateItem.key}] (${translateItem.languageCodesToTranslateTo.join(', ')})`);
 
 
@@ -310,7 +317,7 @@ async function translateSpreadsheet(sheetsCache, sheetId, gameContext, gptVersio
           if (resultText == null)
             continue;
           sheet.getCell(translateItem.rowIndex, j).value = resultText;
-
+          sheet.getCell(translateItem.rowIndex, j).backgroundColor = {red:.8, green:1, blue:.8, alpha: 1};
 
         }
 
