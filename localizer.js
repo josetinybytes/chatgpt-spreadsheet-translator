@@ -109,7 +109,11 @@ async function localizeTexts(
                 Use the provided context for the text, feature names and features context to provide accurate translations.
                 The text might contain HTML or rich text formatting, so please ensure that the translation is accurate and preserves the formatting.
                 Also it can contain string formatters like {0}, {1}, etc. Please ensure that the translation preserves the string formatters.
-                Formatters also can be {%0}, {%1}, etc. Please ensure that the translation preserves the formatters event for RTL languages don't mix {0} and {%0}`
+                Formatters also can be {%0}, {%1}, etc. Please ensure that the translation preserves the formatters event for RTL languages don't mix {0} and {%0}
+                
+                We have a custom tag system in the format [[value:tags]].
+                  - If value is in quotes ("..."), it is text and must be translated, keeping tags unchanged. Example: ["Hello":b,color] → ["Hola":b,color].
+                  - If value has no quotes, it is a variable and must stay exactly the same. Example: [[foo:b,color]] remains unchanged.`
 
         },
         {
