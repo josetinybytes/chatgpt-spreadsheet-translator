@@ -6,7 +6,7 @@
 
 - Translate a specified Google spreadsheet.
 - Optionally include a game context document and features sheet to provide better context for the translation.
-- Configurable GPT version, with a fallback to GPT-4.0.
+- Configurable GPT version, with a fallback to GPT-6 Luna.
 
 ## Installation
 
@@ -46,7 +46,7 @@ Command-Line Options
 --feature-sheet <featureSheet>: The ID of the features sheet.
 --game-context-sheet <gameContextSheet>: The ID of the game context sheet.
 --ignore-game-context: Ignores the game context.
---gpt-version <gptVersion>: The GPT version to use (default: gpt-4o).
+--gpt-version <gptVersion>: The GPT version to use (default: gpt-6-luna).
 ```
 
 #### Environment Variables
@@ -69,5 +69,5 @@ FEATURE_SHEET_ID_FALLBACK=<fallback-feature-sheet-id> # Fallback sheet ID for th
 #### Example Usage
 
 ```bash
-node index.js -s https://docs.google.com/spreadsheets/d/1V-NGWWb3PxIl3YZmB7IqDWL6lgqtpG1S1tykvCp35ro/edit?gid=0#gid=0 --gpt-version gpt-3.5-turbo
+node index.js -s https://docs.google.com/spreadsheets/d/1V-NGWWb3PxIl3YZmB7IqDWL6lgqtpG1S1tykvCp35ro/edit?gid=0#gid=0 --gpt-version gpt-6-luna
 ```

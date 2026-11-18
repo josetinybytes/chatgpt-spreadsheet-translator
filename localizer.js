@@ -36,8 +36,11 @@ async function localizeTexts(
 ) {
 
   if (gptVersion == null)
-    gptVersion = "gpt-4o";
+    gptVersion = "gpt-6-luna";
 
+  // Sheets can return numbers/booleans; normalize before string ops / API payload
+  keyName = keyName == null ? "" : String(keyName);
+  englishText = englishText == null ? "" : String(englishText);
 
   let featuresToKeep = {};
   //Let's remove the non used features keys from the game context
@@ -52,7 +55,10 @@ async function localizeTexts(
         delete gameContext.features[featureKey][languageCode];
       }
     }
-    if (englishText.toLowerCase().trim().includes(gameContext.features[featureKey][`en`].toLowerCase().trim()))
+    const featureEn = gameContext.features[featureKey][`en`];
+    if (featureEn == null)
+      continue;
+    if (englishText.toLowerCase().trim().includes(String(featureEn).toLowerCase().trim()))
       featuresToKeep[featureKey] = gameContext.features[featureKey];
 
   }
@@ -228,6 +234,10 @@ async function translateSpreadsheet(sheetsCache, sheetId, gameContext, gptVersio
     if (key == null || en == null)
       continue;
 
+    // google-spreadsheet returns numeric cells as numbers
+    key = String(key);
+    en = String(en);
+
     try {
       currentContext = sheet.getCell(i, keyColumnIndex)._rawData.note;
     } catch (e) {
@@ -296,33 +306,29 @@ async function translateSpreadsheet(sheetsCache, sheetId, gameContext, gptVersio
   let tasks = [];
 
   for (let i = 0; i < toTranslate.length; i++) {
-    try {
+    const translateItem = toTranslate[i];
+    const taskIndex = tasks.length;
 
-      t = async (index) => {
-        let translateItem = toTranslate[i];
-
+    const t = async (index) => {
+      try {
         console.log(`Translating (${index}) [${translateItem.key}] (${translateItem.languageCodesToTranslateTo.join(', ')})`);
         console.time(`Translating (${index}) [${translateItem.key}] (${translateItem.languageCodesToTranslateTo.join(', ')})`);
-        await sleep(100 * index);//Offset the time for each request, so we don't get rate limited 
+        await sleep(100 * index);//Offset the time for each request, so we don't get rate limited
         let result = await withRetry(async () => await localizeTexts(translateItem.key, translateItem.en, translateItem.languageCodesToTranslateTo, gameContext, translateItem.context, gptVersion, sheet.a1SheetName), 3, 3000);
         console.timeEnd(`Translating (${index}) [${translateItem.key}] (${translateItem.languageCodesToTranslateTo.join(', ')})`);
 
-
-        //console.log(result);
+        const keyAsString = String(translateItem.key);
         for (let j = 0; j < header.length; j++) {
           let languageCode = getLanguageCode(header[j]);
 
           if (languageCode == '' || result[languageCode] == null)
             continue;
 
-
-
-          let resultText = result[languageCode][translateItem.key];
+          let resultText = result[languageCode][keyAsString] ?? result[languageCode][translateItem.key];
           if (resultText == null)
             continue;
           sheet.getCell(translateItem.rowIndex, j).value = resultText;
-          sheet.getCell(translateItem.rowIndex, j).backgroundColor = {red:.8, green:1, blue:.8, alpha: 1};
-
+          sheet.getCell(translateItem.rowIndex, j).backgroundColor = { red: .8, green: 1, blue: .8, alpha: 1 };
         }
 
         console.log(result);
@@ -332,26 +338,24 @@ async function translateSpreadsheet(sheetsCache, sheetId, gameContext, gptVersio
               console.log(`[Error] [${x.key}] in (${x.languageCode}) because ${x.reason}`);
             });
           }
-
         } catch { }
+      } catch (e) {
+        // Keep the batch alive so successful translations still get saved
+        console.log(`Failed translating (${index}) [${translateItem.key}] (${translateItem.languageCodesToTranslateTo.join(', ')})`);
+        console.log(e);
       }
+    };
 
-      tasks.push(t(tasks.length));
+    tasks.push(t(taskIndex));
 
-      if (tasks.length >= PARALLEL_TASKS || i == toTranslate.length - 1) {
-        await Promise.all(tasks);
-        await Promise.all([sheet.saveUpdatedCells(), sleep(1000)]);
-        tasks = [];
-      }
-    } catch (e) {
-      console.log(e);
-      await sheet.saveUpdatedCells();
-    } finally {
+    if (tasks.length >= PARALLEL_TASKS || i == toTranslate.length - 1) {
+      await Promise.all(tasks);
+      await Promise.all([sheet.saveUpdatedCells(), sleep(1000)]);
+      tasks = [];
     }
   }
 
-
-
+  await sheet.saveUpdatedCells();
 }
 
 //Async set timeout function
